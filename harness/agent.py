@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from harness.tools import registry
+from harness.memory import load_agents_md
 
 load_dotenv()
 
@@ -30,15 +31,39 @@ already initialized as a git repo. Use git to:
 - Commit before doing anything risky (large rewrites, deleting files, restructuring). A commit before the risky step gives you a recovery point.
 - Write meaningful commit messages — describe what changed and why, in the present tense (e.g., "add user authentication module").
 - Branch experiments. When trying an alternative approach, create a branch first so the main line of work stays intact.
+
+The workspace contains an `AGENTS.md` file — your durable memory across    
+sessions. It is automatically loaded into your context at the start of
+every session. Update it (using the `write` tool) when you learn
+something worth remembering for future sessions. Good things to write:
+- Project context: what this codebase is, what it does, who uses it
+- Conventions you've observed: code style, libraries, naming patterns
+- Decisions that have been made and the reasoning behind them
+- Gotchas: quirks, non-obvious dependencies, things that have tripped
+  up earlier sessions
+- Active tasks: what's currently being worked on (clear when complete)
+
+When updating AGENTS.md, preserve the existing structure (the section
+headings). Add to the relevant section instead of replacing the whole
+file. If the section starts with a parenthetical hint like "(What is
+this project?)", replace the hint with real content as you fill it in.
 """
 
 
 def run():
     """Run the agent's conversation loop until the user quits."""
 
+    # Load AGENTS.md and assemble the initial message list.       
+    # The first system message is the harness's prompt; the second is the
+    # project's accumulated memory.
+    agents_md = load_agents_md()
+
     # The conversation history. This is the entire memory of the agent.
     # Every turn, we append to it and send the whole thing to the model.
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": agents_md}
+    ]
 
     print("Agent ready. Type 'quit' or 'exit' to leave.\n")
 
