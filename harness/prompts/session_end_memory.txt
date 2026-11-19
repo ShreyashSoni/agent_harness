@@ -1,4 +1,4 @@
-You are being asked to consolidate the session's memory. The current contents of AGENTS.md are provided below. The full session conversation is in the preceding messages.
+You are being asked to consolidate the session's memory. The current contents of AGENTS.md and a transcript of the full session conversation (user messages, your replies, tool calls, and tool results) are provided below.
 
 Your task: produce an UPDATED version of AGENTS.md that reflects everything worth remembering from this session, integrated with what's already there.
 

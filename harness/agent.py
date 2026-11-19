@@ -5,10 +5,14 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from harness.tools import registry
-from harness.memory import load_agents_md
 from harness.config import MODEL, STEP_BUDGET
 from harness.sandbox import Sandbox
 from harness.tools.bash import set_sandbox
+from harness.memory import (
+    load_agents_md,
+    save_agents_md,
+    validate_agents_md_structure
+)
 
 load_dotenv()
 
@@ -33,6 +37,124 @@ reply to it and you can continue from there.
 """
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system.txt").read_text()
+
+# Consolidation prompt loaded from file, like the system prompt.
+SESSION_END_MEMORY_PROMPT = (
+    Path(__file__).parent / "prompts" / "session_end_memory.txt"
+).read_text()
+
+
+# Cap on how much of each tool result goes into the consolidation
+# transcript, so huge outputs (file dumps, logs) don't blow the context.
+_TRANSCRIPT_TOOL_RESULT_LIMIT = 2000
+
+
+def _render_transcript(messages: list) -> str:
+    """Flatten the session history into a plain-text transcript.
+
+    The history holds a mix of dicts and ChatCompletionMessage objects,
+    including assistant tool calls and tool results. Sending those as-is
+    without `tools` is rejected by Bedrock (toolUse/toolResult blocks
+    require a toolConfig), and `tool_choice="none"` is not supported by
+    the gateway. Rendering everything as text sidesteps both problems.
+    """
+    lines = []
+    for m in messages:
+        # Normalise to a dict — assistant tool-call messages are SDK objects.
+        if not isinstance(m, dict):
+            m = m.model_dump()
+
+        role = m.get("role")
+        content = m.get("content") or ""
+
+        # System messages (harness prompt, old AGENTS.md, budget notices)
+        # are not part of what happened in the session.
+        if role == "system":
+            continue
+
+        if role == "user":
+            lines.append(f"USER: {content}")
+        elif role == "assistant":
+            if content:
+                lines.append(f"ASSISTANT: {content}")
+            for call in m.get("tool_calls") or []:
+                fn = call.get("function", {})
+                lines.append(
+                    f"ASSISTANT TOOL CALL: {fn.get('name')}({fn.get('arguments')})"
+                )
+        elif role == "tool":
+            text = str(content)
+            if len(text) > _TRANSCRIPT_TOOL_RESULT_LIMIT:
+                text = text[:_TRANSCRIPT_TOOL_RESULT_LIMIT] + "\n...[truncated]"
+            lines.append(f"TOOL RESULT: {text}")
+
+    return "\n\n".join(lines)
+
+
+def _consolidate_memory(messages: list, client) -> None:
+    """Run the end-of-session memory consolidation step.
+
+    Sends the current AGENTS.md + full session history + a consolidation
+    prompt to the model. Expects a full AGENTS.md rewrite back. Validates
+    the structure before writing. On failure, logs and keeps the old file.
+    """
+    print("Consolidating memory...")
+
+    try:
+        # Step 1: gather the inputs — current AGENTS.md and the full history.
+        current_agents_md = load_agents_md()
+
+        # Step 2: build the consolidation payload as a single user message
+        # containing the prompt, the current AGENTS.md, and a text transcript
+        # of the session. Constraints from the Bedrock-backed gateway:
+        #   - The conversation must end with a user message (no assistant
+        #     prefill), and system messages get hoisted out, so the request
+        #     must be user-terminated.
+        #   - tool_choice="none" is not supported.
+        #   - Raw tool-call / tool-result messages require `tools` to be sent.
+        # A flat transcript with no tools satisfies all three and guarantees
+        # a text-only response.
+        transcript = _render_transcript(messages)
+        consolidation_context = (
+            f"{SESSION_END_MEMORY_PROMPT}\n\n"
+            f"=== Current AGENTS.md ===\n{current_agents_md}\n\n"
+            f"=== Session transcript ===\n{transcript}\n"
+        )
+        consolidation_messages = [
+            {"role": "user", "content": consolidation_context},
+        ]
+
+        # Step 3: one model call, no tools, so the reply is the file content.
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=consolidation_messages,
+        )
+        proposed = response.choices[0].message.content
+
+        if not proposed:
+            print("Memory consolidation returned empty content. Keeping current AGENTS.md.")
+            return
+
+        # Step 4: validate structure. Reject a malformed return without
+        # touching the file.
+        if not validate_agents_md_structure(proposed):
+            print(
+                "Memory consolidation returned malformed structure "
+                "(missing section headers). Keeping current AGENTS.md."
+            )
+            return
+
+        # Step 5: atomic write. The old file is replaced by the new one
+        # in a single filesystem operation.
+        save_agents_md(proposed)
+        print("Memory updated.")
+
+    except Exception as e:
+        # If anything goes wrong during consolidation — API error, timeout,
+        # unexpected exception — we log and return. The old AGENTS.md stays
+        # intact. Consolidation is a nice-to-have; sandbox teardown is
+        # non-negotiable.
+        print(f"Memory consolidation failed: {e}. Keeping current AGENTS.md.")
 
 
 def run():
@@ -67,6 +189,7 @@ def run():
 
             # 2. Allow the user to leave cleanly
             if user_input in {"quit", "exit"}:
+                _consolidate_memory(messages, client)
                 print("Goodbye.")
                 break
 
@@ -97,7 +220,9 @@ def run():
                         model=MODEL,
                         messages=messages,
                         tools=registry.get_schemas(),
-                        tool_choice="none",
+                        # No tool_choice: "none" is not supported by the
+                        # Bedrock-backed gateway. BUDGET_HIT_MESSAGE tells the
+                        # model not to call tools instead.
                     )
                     message = response.choices[0].message
                     break
