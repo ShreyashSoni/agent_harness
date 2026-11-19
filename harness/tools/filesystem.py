@@ -42,6 +42,14 @@ def read(path: str) -> str:
 def write(path: str, content: str) -> str:
     """Write content to a file in the workspace, creating it if needed.
     Overwrites the file if it already exists. Returns confirmation with byte count."""
+
+    # Prevent accidental clobbering by treating memory as a regular file.
+    if path == "AGENTS.md" or path.endswith("/AGENTS.md"):
+        return (
+            "[write] AGENTS.md is memory-mamnaged. Use the `remember` tool"
+            "with a category and entry instead of write()."
+        )
+    
     # Step 1: resolve the target path safely.
     target = _resolve_path(path)
 
