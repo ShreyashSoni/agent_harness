@@ -14,3 +14,6 @@ wheels/
 
 # Harness Workspace
 workspace/
+
+# Vector databse file
+.rag_index
