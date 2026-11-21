@@ -65,6 +65,27 @@ def write(path: str, content: str) -> str:
 
 
 @tool
+def append(path: str, content: str) -> str:
+    """Append content to the end of a file in the workspace, creating it if
+    needed. Use this to build large files in several smaller calls: write()
+    the first section, then append() each following section."""
+
+    if path == "AGENTS.md" or path.endswith("/AGENTS.md"):
+        return (
+            "[append] AGENTS.md is memory-managed. Use the `remember` tool "
+            "with a category and entry instead."
+        )
+
+    target = _resolve_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    with target.open("a") as f:
+        f.write(content)
+
+    return f"appended {len(content)} bytes to {path} (total {target.stat().st_size} bytes)"
+
+
+@tool
 def list(path: str = ".") -> str:
     """List the files and directories at the given path inside the workspace.
     Defaults to the workspace root. Returns one entry per line."""
