@@ -17,3 +17,6 @@ workspace/
 
 # Vector databse file
 .rag_index
+
+# Context compaction file
+.harness
