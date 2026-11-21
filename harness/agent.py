@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from harness.tools import registry
-from harness.config import MODEL, STEP_BUDGET
+from harness.config import MODEL, STEP_BUDGET, MAX_TOKENS
 from harness.sandbox import Sandbox
 from harness.tools.bash import set_sandbox
 from harness.memory import (
@@ -36,6 +36,17 @@ Your response will be the final message for this turn. The user will
 reply to it and you can continue from there.
 """
 
+# Tool result returned for every tool call in a response that was cut off
+# by the max_tokens limit. The call's arguments are incomplete, so we do
+# not execute it — we tell the model why and how to recover.
+TRUNCATED_CALL_MESSAGE = (
+    "error: your response hit the output token limit and was truncated, so "
+    "this tool call's arguments are incomplete and it was NOT executed. "
+    "Do not retry the same large call. Split the work: call write() with "
+    "the first section of the file only, then call append() with each "
+    "remaining section (keep each call well under ~2000 words)."
+)
+
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system.txt").read_text()
 
 # Consolidation prompt loaded from file, like the system prompt.
@@ -43,10 +54,18 @@ SESSION_END_MEMORY_PROMPT = (
     Path(__file__).parent / "prompts" / "session_end_memory.txt"
 ).read_text()
 
-
 # Cap on how much of each tool result goes into the consolidation
 # transcript, so huge outputs (file dumps, logs) don't blow the context.
 _TRANSCRIPT_TOOL_RESULT_LIMIT = 2000
+
+
+def _parse_arguments(raw: str | None) -> dict | None:
+    """Parse tool-call arguments JSON. Returns None if it is malformed."""
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _render_transcript(messages: list) -> str:
@@ -206,10 +225,17 @@ def run():
                 response = client.chat.completions.create(
                     model=MODEL,
                     messages=messages,
-                    tools=registry.get_schemas()
+                    tools=registry.get_schemas(),
+                    max_tokens=MAX_TOKENS,
                 )
 
-                message = response.choices[0].message
+                choice = response.choices[0]
+                message = choice.message
+                truncated = choice.finish_reason == "length"
+
+                if truncated and not message.tool_calls:
+                    # Plain-text reply cut off. Show what we got, flagged.
+                    print("[warning] response hit max_tokens and was truncated")
 
                 if not message.tool_calls:
                     break
@@ -220,6 +246,7 @@ def run():
                         model=MODEL,
                         messages=messages,
                         tools=registry.get_schemas(),
+                        max_tokens=MAX_TOKENS,
                         # No tool_choice: "none" is not supported by the
                         # Bedrock-backed gateway. BUDGET_HIT_MESSAGE tells the
                         # model not to call tools instead.
@@ -227,11 +254,46 @@ def run():
                     message = response.choices[0].message
                     break
 
-                messages.append(message)
-
+                # Parse arguments up front. Truncated or malformed JSON must
+                # not be echoed back into history verbatim — the gateway
+                # would reject it on the next request — so we sanitise it.
+                parsed_calls = []
                 for call in message.tool_calls:
-                    arguments = json.loads(call.function.arguments)
-                    result = registry.dispatch(call.function.name, arguments)
+                    args = _parse_arguments(call.function.arguments)
+                    parsed_calls.append((call, args))
+
+                messages.append({
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.function.name,
+                                "arguments": json.dumps(args if args is not None else {}),
+                            },
+                        }
+                        for call, args in parsed_calls
+                    ],
+                })
+
+                if truncated:
+                    print(
+                        "[warning] response hit max_tokens; tool call(s) "
+                        "truncated and skipped"
+                    )
+
+                for call, args in parsed_calls:
+                    if truncated:
+                        result = TRUNCATED_CALL_MESSAGE
+                    elif args is None:
+                        result = (
+                            "error: tool call arguments were not valid JSON; "
+                            "the call was not executed."
+                        )
+                    else:
+                        result = registry.dispatch(call.function.name, args)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call.id,
