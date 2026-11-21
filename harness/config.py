@@ -13,6 +13,13 @@ happens to use.
 # model ID works (e.g., "gpt-4o-mini", "kimi-k2.6").
 MODEL: str = "anthropic.claude-sonnet-5"
 
+# Maximum tokens the model may generate per response. Tool-call arguments
+# (e.g. the full `content` of a write() call) count against this. If the
+# limit is too low, long file writes get truncated mid-call and arrive
+# with missing arguments. Claude Sonnet supports far more than this; lower
+# it if your gateway rejects the value.
+MAX_TOKENS: int = 16384
+
 # -- ReAct loop bounds --
 # Maximum number of tool-call rounds per user turn. When hit, the harness
 # forces the model to summarize what it did and hand control back to you.

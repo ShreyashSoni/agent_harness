@@ -40,7 +40,7 @@ def _format_results(chunks: list[str], sources: list[str], query: str) -> str:
 
 
 @tool
-def recall(query: str, max_results: int) -> str:
+def recall(query: str, max_results: int = 5) -> str:
     """Search the knowledge corpus for content relevant to a query.
 
     Use this to look up information from the project's knowledge base —
