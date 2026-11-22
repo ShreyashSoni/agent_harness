@@ -5,9 +5,21 @@ would adjust without changing behavior code. Deep behavioral constants
 (e.g., BUDGET_HIT_MESSAGE, AGENTS_MD_TEMPLATE) stay in their behavior
 modules, because they're part of what the harness *is*, not values it
 happens to use.
-
 """
 
+
+from pathlib import Path
+
+# -- Workspace --   
+# The workspace directory. All filesystem tools operate inside this;
+# the sandbox bind-mounts it; the offloader writes tool outputs into
+# a subdirectory (.tool_outputs/) under it.
+#
+# Defined here (not in filesystem.py) so other modules can import it
+# without pulling in the tool registry — avoids a circular import when
+# harness/context/offloader.py needs the workspace path.
+WORKSPACE: Path = Path("./workspace").resolve()
+WORKSPACE.mkdir(exist_ok=True)
 # -- Model configuration --
 # The chat completion model the harness calls. Any OpenAI-compatible
 # model ID works (e.g., "gpt-4o-mini", "kimi-k2.6").
