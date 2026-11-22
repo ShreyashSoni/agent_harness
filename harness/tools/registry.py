@@ -5,6 +5,8 @@ from typing import Any, Callable
 from pydantic import TypeAdapter
 import inspect
 
+from harness.context.offloader import maybe_offload
+
 
 @dataclass
 class Tool:
@@ -76,22 +78,12 @@ class ToolRegistry:
         # the tool subsequently crashes or hangs.
         print(_format_tool_call(name, arguments))
 
-        # Check required arguments up front so a missing one produces a clear,
-        # actionable error instead of a raw TypeError.
-        required = self._tools[name].schema.get("required", [])
-        missing = [r for r in required if r not in arguments]
-        if missing:
-            return (
-                f"error: {name}() called without required argument(s): "
-                f"{', '.join(missing)}. If you were passing a large value, it "
-                f"may have been truncated — split it into smaller calls."
-            )
-
         # Run the tool, catching any exception so a buggy call doesn't crash the loop.
         # The model sees the error string and decides what to do next.
         try:
             result = self._tools[name].function(**arguments)
-            return str(result)
+            result_str = str(result)
+            return maybe_offload(name, result_str)
         except Exception as e:
             return f"error: {type(e).__name__}: {e}"
 
