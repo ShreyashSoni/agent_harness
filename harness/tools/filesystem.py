@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from harness.tools.registry import tool
-from harness.config import WORKSPACE
+from harness.config import WORKSPACE, PLAN_FILENAME
 
 
 def _resolve_path(path: str) -> Path:
@@ -35,14 +35,29 @@ def read(path: str) -> str:
 
 @tool
 def write(path: str, content: str) -> str:
-    """Write content to a file in the workspace, creating it if needed.
-    Overwrites the file if it already exists. Returns confirmation with byte count."""
+    """Write content to a file in the workspace.
 
-    # Prevent accidental clobbering by treating memory as a regular file.
+    Overwrites the file if it exists; creates it (and any parent
+    directories) if it doesn't. Path is relative to the workspace root.
+
+    Cannot be used to write AGENTS.md — that file is memory-managed
+    via the `remember` tool. Use `remember(category, entry)` instead.
+
+    Cannot be used to write plan.md — that file is plan-managed via
+    the `update_plan` tool. Use `update_plan(task, status)` instead.
+    """
+    # Step 1a: refuse AGENTS.md — memory writes must go through remember().
     if path == "AGENTS.md" or path.endswith("/AGENTS.md"):
         return (
             "[write] AGENTS.md is memory-mamnaged. Use the `remember` tool"
             "with a category and entry instead of write()."
+        )
+
+    # Step 1b: refuse plan.md — plan writes must go through update_plan(). 
+    if path == PLAN_FILENAME or path.endswith(f"/{PLAN_FILENAME}"):
+        return (
+            f"[write] {PLAN_FILENAME} is plan-managed. Use the `update_plan` "
+            f"tool with task and status arguments instead of write()."
         )
     
     # Step 1: resolve the target path safely.
@@ -69,6 +84,12 @@ def append(path: str, content: str) -> str:
         return (
             "[append] AGENTS.md is memory-managed. Use the `remember` tool "
             "with a category and entry instead."
+        )
+
+    if path == PLAN_FILENAME or path.endswith(f"/{PLAN_FILENAME}"):
+        return (
+            f"[write] {PLAN_FILENAME} is plan-managed. Use the `update_plan` "
+            f"tool with task and status arguments instead of write()."
         )
 
     target = _resolve_path(path)
