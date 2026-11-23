@@ -46,7 +46,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _empty_plan(goal: str = "New Task") -> str:
+def _empty_plan(goal: str = "New task") -> str:
     """The initial plan.md content when the file is created for the first time."""
     return (
         f"# Plan: {goal}\n\n"
@@ -71,7 +71,7 @@ def _parse_tasks(plan_text: str) -> list[dict]:
     for line in plan_text.splitlines():
         stripped = line.strip()
 
-        # Section boundaries
+        # Section boundaries.
         if stripped.startswith("## Tasks"):
             in_tasks_section = True
             continue
@@ -83,17 +83,17 @@ def _parse_tasks(plan_text: str) -> list[dict]:
 
         # Task line — either "- [x] text" (done) or "- [ ] text" (open).
         if stripped.startswith("- [x] "):
-            tasks.append({"text": stripped[:6], "status": "done", "notes": None})
+            tasks.append({"text": stripped[6:], "status": "done", "notes": None})
         elif stripped.startswith("- [ ] "):
             # Check for a "(blocked)" marker inline. Simple heuristic:
             # a bracketed status suffix marks non-done open items.
             text = stripped[6:]
             status = "blocked" if text.endswith(" (blocked)") else "todo"
             if status == "blocked":
-                text = text[: -len(" (bloacked)")]
+                text = text[: -len(" (blocked)")]
             tasks.append({"text": text, "status": status, "notes": None})
         elif stripped.startswith("- Notes: ") and tasks:
-            # Notes attach to the most recent task
+            # Notes attach to the most recent task.
             tasks[-1]["notes"] = stripped[9:]
 
     return tasks
