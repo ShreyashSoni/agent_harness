@@ -8,3 +8,4 @@ from harness.tools import git  # noqa: F401
 from harness.tools import bash # noqa: F401
 from harness.tools import web_search # noqa: F401
 from harness.rag import recall # noqa: F401
+from harness.planning import update_plan

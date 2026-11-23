@@ -35,7 +35,7 @@ MAX_TOKENS: int = 16384
 # -- ReAct loop bounds --
 # Maximum number of tool-call rounds per user turn. When hit, the harness
 # forces the model to summarize what it did and hand control back to you.
-STEP_BUDGET: int = 25
+STEP_BUDGET: int = 35
 
 # -- Tool timeouts (seconds) --
 # Per-command execution timeouts. Longer for bash (covers real work like
@@ -158,3 +158,26 @@ OFFLOAD_THRESHOLD_TOKENS: int = 1_000
 # bulk log output usually sits — that's what we send to disk.
 OFFLOAD_HEAD_TOKENS: int = 300
 OFFLOAD_TAIL_TOKENS: int = 300
+
+# -- Planning support -- 
+# The name of the plan file inside the workspace. Kept as a constant
+# (not user-configurable per session) so the model can be told about
+# the exact filename in the system prompt.
+PLAN_FILENAME: str = "plan.md"
+
+# How often (in assistant turns) the harness injects a reminder to
+# update the plan. Only fires when plan.md exists and has at least
+# one open item. Same shape as compaction firing on a threshold —
+# harness owns when, model owns what.
+#
+# Lower = more nagging but tighter plan freshness. Higher = quieter
+# but more plan drift. 2 allows it to trigger constantly for updates: plans stay fresh within
+# a small window of turns, without spamming every turn.
+PLAN_REMINDER_INTERVAL: int = 2
+
+# Maximum characters to inject from plan.md at session start. Plans
+# rarely get near this — a normal plan is a few hundred chars. This
+# just caps a pathological case (someone accidentally pipes a huge
+# file into plan.md, session start would otherwise inject the whole
+# thing). At 4 chars/token, ~5000 chars ≈ 1250 tokens.
+PLAN_INJECTION_MAX_CHARS: int = 5000
