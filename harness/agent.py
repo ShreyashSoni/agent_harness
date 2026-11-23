@@ -10,7 +10,8 @@ from harness.config import (
     STEP_BUDGET,
     MAX_TOKENS,
     COMPACTION_THRESHOLD,
-    COMPACTION_KEEP_RECENT
+    COMPACTION_KEEP_RECENT,
+    PLAN_REMINDER_INTERVAL
 )
 from harness.context import Compactor
 from harness.sandbox import Sandbox
@@ -19,6 +20,11 @@ from harness.memory import (
     load_agents_md,
     save_agents_md,
     validate_agents_md_structure
+)
+from harness.planning import (
+    load_plan_for_injection,
+    has_open_items,
+    build_reminder_message
 )
 
 load_dotenv()
@@ -32,7 +38,7 @@ client = OpenAI(
 # It tells the model why it's being asked to stop and what shape its
 # response should take.
 BUDGET_HIT_MESSAGE = """\
-You've reached the step budget for this turn (25 tool calls). Do not make
+You've reached the step budget for this turn (35 tool calls). Do not make
 any more tool calls. Instead, respond directly to the user with:
 
 1. What you accomplished in this turn.
@@ -233,7 +239,24 @@ def run():
             {"role": "system", "content": agents_md}
         ]
 
-        print("Agent ready. Type 'quit' or 'exit' to leave. \nType /compact to force compaction.\n")
+        # Session-start plan injection — same shape as AGENTS.md loading above.
+        # If workspace/plan.md exists, inject its contents as a system message
+        # so the agent sees the current plan on turn 1 without asking.
+        plan_content = load_plan_for_injection()
+        if plan_content is not None:
+            messages.append({
+                "role": "system",
+                "content": f"## Current plan (from workspace/plan.md)\n\n{plan_content}"
+            })
+            print(f"[Loaded plan.md into context: {len(plan_content):,} chars]")
+
+        # Track turns since the last planning reminder was fired. 
+        # Per-session state — must persist across all turns of the outer loop,
+        # not reset each iteration. Increments on each user turn; resets to 0
+        # when a reminder fires.
+        turns_since_reminder = 0
+
+        print("Agent ready. \nType 'quit' or 'exit' to leave. \nType /compact to force compaction.\n")
 
         while True:
             # Compaction check runs BEFORE reading user input. If the
@@ -274,6 +297,15 @@ def run():
             # 3. Append the user's message to the history
             messages.append({"role": "user", "content": user_input})
 
+            # Fire the planning reminder if the interval has elapsed AND
+            # plan.md has open items. Prepended as a system message so it
+            # arrives ahead of the ReAct loop's first model call this turn.
+            turns_since_reminder += 1
+            if turns_since_reminder >= PLAN_REMINDER_INTERVAL and has_open_items():
+                messages.append({"role": "system", "content": build_reminder_message()})
+                print(f"[Planning reminder injected — {turns_since_reminder} turns since last]")
+                turns_since_reminder = 0
+
             # 4. Full ReAct dispatch loop — replaces the single-round dispatch
             step_count = 0
             while True:
@@ -299,7 +331,7 @@ def run():
                     break
 
                 if step_count >= STEP_BUDGET:
-                    messages.append({"role": "system", "content": BUDGET_HIT_MESSAGE})
+                    messages.append({"role": "user", "content": BUDGET_HIT_MESSAGE})
                     response = client.chat.completions.create(
                         model=MODEL,
                         messages=messages,
