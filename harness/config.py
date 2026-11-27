@@ -208,23 +208,47 @@ RALPH_EVAL_MODEL: str = MODEL
 
 # Prompt for the semantic evaluator. Structured output (DONE / NOT_DONE
 # prefix) makes Ralph's parsing trivial.
+#
+# The prompt judges OUTCOMES, not PROCESS: it asks "is the deliverable
+# produced and is there remaining work another iteration could do?"
+# Judging process (e.g. "the agent skipped a review step") produces
+# NOT_DONE verdicts that no future iteration can ever fix — an
+# infinite loop until the continuation cap.
 RALPH_EVAL_PROMPT: str = """You are evaluating whether an agent has completed a user's task.
 
-Original user goal:
+User goal:
 {goal}
 
 Current plan state (from plan.md):
 {plan}
 
-Recent conversation summary:
+Recent conversation summary (only the latest iteration; earlier work may
+have happened in prior iterations whose context was cleared — trust the
+plan state and any files/commits it references as evidence of that work):
 {recent_summary}
 
-Has the goal been met? Answer with exactly one of:
-- "DONE: <one-sentence reason>" if the goal is fully satisfied
-- "NOT_DONE: <one-sentence reason>" if meaningful work remains
+Judge OUTCOMES, not PROCESS. Ask only: have the deliverables the goal asks
+for been produced, and is there remaining work that another iteration of
+the agent could actually perform?
 
-Be strict — if the agent's work is partial, incomplete, unverified, or if
-there are open plan items that haven't been addressed, answer NOT_DONE."""
+Rules:
+- If the goal contains a current execution instruction, that instruction
+  is authoritative. Earlier process steps (e.g. "draw up a plan so I can
+  review", "wait for approval") are background and are already in the past.
+- Never answer NOT_DONE because of how or in what order the work was done.
+  Skipped or out-of-order process steps cannot be undone by continuing, so
+  they are not grounds for NOT_DONE.
+- If the plan shows all tasks done and nothing indicates missing or broken
+  deliverables, answer DONE — even if the latest message is the agent
+  noting that the work is already complete or asking what to do next.
+- Answer NOT_DONE only when concrete work remains: open plan items,
+  deliverables missing or clearly partial, or errors the agent left
+  unresolved.
+
+Answer with exactly one of:
+- "DONE: <one-sentence reason>" if the deliverables are produced
+- "NOT_DONE: <one-sentence reason naming the concrete remaining work>"
+"""
 
 # -- Subagent spawning --    
 # Step budget for subagents. Deliberately smaller than the parent's

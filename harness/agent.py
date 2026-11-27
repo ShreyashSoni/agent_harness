@@ -364,6 +364,28 @@ def _run_react_loop(client, messages: list, compactor: Compactor):
         step_count += 1
 
 
+def _compose_ralph_goal(last_input: str | None, instruction: str | None) -> str:
+    """Build the goal Ralph evaluates against.
+
+    Without an instruction, the last substantive user message is the goal.
+    With one (`/ralph <instruction>`), the instruction is what the user
+    actually wants driven to completion — the earlier message is often a
+    planning request ("draw up a plan so I can review") whose process
+    steps are already in the past. Both are included so the evaluator has
+    the full context, but the instruction is marked as authoritative.
+    """
+    if not instruction:
+        return last_input or ""
+    if not last_input:
+        return instruction
+    return (
+        f"Earlier user request (background context):\n{last_input}\n\n"
+        f"Current execution instruction (authoritative — this is what must "
+        f"be completed; it supersedes any process steps in the earlier "
+        f"request, such as pausing for review):\n{instruction}"
+    )
+
+
 def _run_ralph(client, messages, compactor, goal, continuation_prompt):
     """Run Ralph until the goal is met or the continuation cap is hit.
 
@@ -507,24 +529,23 @@ def run():
                     print(build_no_goal_refusal())
                     continue
 
-                # Parse optional per-invocation continuation prompt.
-                if user_input == "/ralph":
-                    continuation_prompt = RALPH_CONTINUATION_PROMPT
-                else:
-                    continuation_prompt = user_input[len("/ralph "):].strip()
-                    if not continuation_prompt:
-                        continuation_prompt = RALPH_CONTINUATION_PROMPT
+                # Parse optional per-invocation instruction. When present
+                # it is both the continuation prompt AND part of the goal
+                # Ralph evaluates against.
+                ralph_instruction = user_input[len("/ralph"):].strip() or None
+                continuation_prompt = ralph_instruction or RALPH_CONTINUATION_PROMPT
 
                 # Hand execution to Ralph. This runs the ReAct loop
                 # repeatedly with forced continuations until the goal
-                # is met or the cap is hit. Uses last_substantive_input
-                # as the goal — the plan.md contents are read fresh
-                # inside is_goal_met each iteration.
+                # is met or the cap is hit. The goal combines the prior
+                # substantive input (context) with the /ralph instruction
+                # (what to drive to completion) — the plan.md contents
+                # are read fresh inside is_goal_met each iteration.
                 _run_ralph(
                     client,
                     messages,
                     compactor,
-                    goal=last_substantive_input,
+                    goal=_compose_ralph_goal(last_substantive_input, ralph_instruction),
                     continuation_prompt=continuation_prompt
                 )
                 continue
