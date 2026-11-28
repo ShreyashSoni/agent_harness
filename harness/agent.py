@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
+from langsmith.wrappers import wrap_openai
 
 from harness.tools import registry
 from harness.context import Compactor
@@ -40,9 +41,11 @@ from harness.config import (
 
 load_dotenv()
 
-client = OpenAI(
-    base_url="https://floodgate.g.apple.com/api/openai/v1",
-    api_key=os.getenv("OPENAI_API_KEY")
+client = wrap_openai(
+    OpenAI(
+        base_url="https://floodgate.g.apple.com/api/openai/v1",
+        api_key=os.getenv("OPENAI_API_KEY")
+    )
 )
 
 # The synthetic system message injected when the step budget is exceeded.
